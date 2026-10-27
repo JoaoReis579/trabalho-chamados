@@ -1,0 +1,217 @@
+@base = http://localhost:3000
+
+### Preparação: pessoa solicitante ativa
+POST {{base}}/pessoas
+Content-Type: application/json
+
+{"nome":"Ana Solicitante","email":"ana@example.com","tipo":"SOLICITANTE"}
+
+### Preparação: técnico ativo
+POST {{base}}/pessoas
+Content-Type: application/json
+
+{"nome":"Bruno Técnico","email":"bruno@example.com","tipo":"TECNICO"}
+
+### Preparação: segundo solicitante (IDs de exemplo consideram banco vazio)
+POST {{base}}/pessoas
+Content-Type: application/json
+
+{"nome":"Carlos Solicitante","email":"carlos@example.com","tipo":"SOLICITANTE"}
+
+### Regra 1: email inválido (400); email repetido (409)
+POST {{base}}/pessoas
+Content-Type: application/json
+
+{"nome":"Pessoa Inválida","email":"nao-e-email","tipo":"SOLICITANTE"}
+
+### Regra 1: duplicidade (409)
+POST {{base}}/pessoas
+Content-Type: application/json
+
+{"nome":"Duplicada","email":"ana@example.com","tipo":"SOLICITANTE"}
+
+### Regra 2: enum fora de SOLICITANTE/TECNICO (400)
+POST {{base}}/pessoas
+Content-Type: application/json
+
+{"nome":"Tipo Inválido","email":"tipo@example.com","tipo":"ADMIN"}
+
+### Filtros de pessoa; tipo inválido e ativo que não seja true/false retornam 400
+GET {{base}}/pessoas?tipo=TECNICO&ativo=true
+
+### Regra 5: tipo de problema (criar)
+POST {{base}}/tipos-problema
+Content-Type: application/json
+
+{"nome":"Rede"}
+
+### Regra 5: nome duplicado (409)
+POST {{base}}/tipos-problema
+Content-Type: application/json
+
+{"nome":"Rede"}
+
+### Regra 6: desative o tipo usado; abrir chamado nele deve dar 400
+PATCH {{base}}/tipos-problema/1
+Content-Type: application/json
+
+{"ativo":false}
+
+### Tente abrir chamado enquanto o tipo está desativado (400)
+POST {{base}}/chamados
+Content-Type: application/json
+
+{"titulo":"Tipo inativo","descricao":"Descrição longa para validar tipo inativo.","solicitanteId":1,"tipoProblemaId":1}
+
+### Reative para continuar os exemplos
+PATCH {{base}}/tipos-problema/1
+Content-Type: application/json
+
+{"ativo":true}
+
+### Regra 9 e 10: solicitante ativo; título 5-100 e descrição com pelo menos 10 caracteres
+POST {{base}}/chamados
+Content-Type: application/json
+
+{"titulo":"Falha na rede","descricao":"Não consigo acessar a rede do setor.","solicitanteId":1,"tipoProblemaId":1}
+
+### Regra 10: título curto ou descrição curta (400)
+POST {{base}}/chamados
+Content-Type: application/json
+
+{"titulo":"Oi","descricao":"Curta","solicitanteId":1,"tipoProblemaId":1}
+
+### Regra 9: pessoa do tipo TECNICO não pode abrir; inativa também não (400)
+POST {{base}}/chamados
+Content-Type: application/json
+
+{"titulo":"Chamado inválido","descricao":"Descrição longa o bastante.","solicitanteId":2,"tipoProblemaId":1}
+
+### Regra 8 e 11: resultado deve nascer ABERTO, sem técnico e prioridade MEDIA
+GET {{base}}/chamados/1
+
+### Filtros de chamado; enums/IDs inválidos retornam 400
+GET {{base}}/chamados?situacao=ABERTO&prioridade=MEDIA&tipoProblemaId=1&tecnicoId=2
+
+### Regra 12 e 18: designar técnico ativo, tipo TECNICO, diferente do solicitante
+PATCH {{base}}/chamados/1/designar-tecnico
+Content-Type: application/json
+
+{"tecnicoId":2}
+
+### Regra 12: desative o técnico e tente designá-lo (400), depois reative para seguir
+PATCH {{base}}/pessoas/2
+Content-Type: application/json
+
+{"ativo":false}
+
+### Técnico inativo não pode ser designado (400)
+PATCH {{base}}/chamados/1/designar-tecnico
+Content-Type: application/json
+
+{"tecnicoId":2}
+
+### Reative o técnico para continuar
+PATCH {{base}}/pessoas/2
+Content-Type: application/json
+
+{"ativo":true}
+
+### Regra 13: designação faz ABERTO -> EM_ATENDIMENTO automaticamente
+GET {{base}}/chamados/1
+
+### Regra 14: transição proibida (por exemplo EM_ATENDIMENTO -> FECHADO) retorna 400
+PATCH {{base}}/chamados/1/situacao
+Content-Type: application/json
+
+{"situacao":"FECHADO","usuarioId":2}
+
+### Regra 14: ABERTO -> EM_ATENDIMENTO manual sem técnico retorna 400
+POST {{base}}/chamados
+Content-Type: application/json
+
+{"titulo":"Outro chamado","descricao":"Descrição de outro chamado.","solicitanteId":3,"tipoProblemaId":1}
+
+### Tente esta mudança no chamado recém-criado sem técnico (400)
+PATCH {{base}}/chamados/2/situacao
+Content-Type: application/json
+
+{"situacao":"EM_ATENDIMENTO"}
+
+### Regra 16: EM_ATENDIMENTO -> RESOLVIDO grava resolvidoEm
+PATCH {{base}}/chamados/1/situacao
+Content-Type: application/json
+
+{"situacao":"RESOLVIDO","usuarioId":2}
+
+### Regra 16 e 14: RESOLVIDO -> EM_ATENDIMENTO limpa resolvidoEm (técnico deve ter vaga)
+PATCH {{base}}/chamados/1/situacao
+Content-Type: application/json
+
+{"situacao":"EM_ATENDIMENTO","usuarioId":2}
+
+### Regra 14: RESOLVIDO -> FECHADO é permitido (execute após resolver novamente)
+PATCH {{base}}/chamados/1/situacao
+Content-Type: application/json
+
+{"situacao":"RESOLVIDO"}
+
+### Fechar após resolver outra vez, situação final não aceita alterações/comentários
+PATCH {{base}}/chamados/1/situacao
+Content-Type: application/json
+
+{"situacao":"FECHADO"}
+
+### Regra 15: chamado FECHADO não aceita nova designação, alteração ou comentário (400)
+POST {{base}}/chamados/1/comentarios
+Content-Type: application/json
+
+{"autorId":1,"texto":"Comentário após fechamento."}
+
+### Regra 17: ao exceder 5 chamados em atendimento por técnico, designação/reabertura retorna 400
+### Crie e designe seis chamados para o mesmo técnico; a sexta designação deve falhar.
+
+### Regra 19: autor permitido é solicitante ou técnico responsável ativo; outro autor recebe 403
+POST {{base}}/chamados/2/comentarios
+Content-Type: application/json
+
+{"autorId":2,"texto":"Comentário de pessoa sem vínculo."}
+
+### Regra 20: texto vazio ou só espaços recebe 400
+POST {{base}}/chamados/2/comentarios
+Content-Type: application/json
+
+{"autorId":3,"texto":"     "}
+
+### Regra 19 e 20: comentário válido pelo solicitante
+POST {{base}}/chamados/2/comentarios
+Content-Type: application/json
+
+{"autorId":3,"texto":"Ainda preciso de ajuda."}
+
+### Comentários aparecem em ordem cronológica; não há endpoints de edição/remoção
+GET {{base}}/chamados/2/comentarios
+
+### Regra 4: pessoa vinculada como solicitante, técnico ou autora não pode ser removida (400); desative com PATCH
+DELETE {{base}}/pessoas/1
+
+### Regra 4: desativar é permitido, excluir pessoa sem envolvimento é permitido
+PATCH {{base}}/pessoas/3
+Content-Type: application/json
+
+{"ativo":false}
+
+### Regra 7: tipo já usado não pode ser removido (400); desative com PATCH
+DELETE {{base}}/tipos-problema/1
+
+### IDs inexistentes resultam em 404; IDs malformados resultam em 400
+GET {{base}}/pessoas/999999
+
+### Para validar regra 4 de pessoa inativa, desative uma pessoa sem vínculo e tente usá-la
+### em POST /chamados (solicitante) ou POST /chamados/:id/comentarios (autor): esperado 400/403.
+
+### Para validar regra 12, tente designar pessoa solicitante ou inativa: esperado 400.
+
+### Para validar regra 17, crie 6 chamados, designe o mesmo técnico nos 5 primeiros
+### e tente designá-lo no sexto: a sexta operação deve retornar 400.
+
